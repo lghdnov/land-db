@@ -3,11 +3,11 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "plot/AgriculturalPlot.hpp"
@@ -25,28 +25,46 @@ std::vector<std::string> splitFields(const std::string &line) {
   return fields;
 }
 
-std::unique_ptr<LandPlot> makePlot(const std::vector<std::string> &f) {
-  if (f.size() < 8)
-    throw std::runtime_error("ожидается минимум 8 полей, получено " +
-                             std::to_string(f.size()));
+using Parser = std::unique_ptr<LandPlot> (*)(const std::vector<std::string> &);
 
-  Owner owner{f[4], f[5], f[6]};
-  if (f[0] == "R")
-    return std::make_unique<ResidentialPlot>(f[1], std::stod(f[2]), f[3],
-                                             std::move(owner), std::stod(f[7]));
-  if (f[0] == "A") {
-    if (f.size() < 9)
-      throw std::runtime_error("для сельхозучастка ожидается 9 полей");
-    return std::make_unique<AgriculturalPlot>(
-        f[1], std::stod(f[2]), f[3], std::move(owner), f[7], std::stod(f[8]));
-  }
-  if (f[0] == "C") {
-    if (f.size() < 9)
-      throw std::runtime_error("для коммерческого участка ожидается 9 полей");
-    return std::make_unique<CommercialPlot>(
-        f[1], std::stod(f[2]), f[3], std::move(owner), f[7], std::stoi(f[8]));
-  }
-  throw std::runtime_error("неизвестный тип участка: " + f[0]);
+struct PlotType {
+  size_t minFields;
+  Parser parse;
+};
+
+const std::map<std::string, PlotType> kPlotTypes = {
+    {"R",
+     {8,
+      [](const std::vector<std::string> &f) -> std::unique_ptr<LandPlot> {
+        return std::make_unique<ResidentialPlot>(f[1], std::stod(f[2]), f[3],
+                                                 Owner{f[4], f[5], f[6]},
+                                                 std::stod(f[7]));
+      }}},
+    {"A",
+     {9,
+      [](const std::vector<std::string> &f) -> std::unique_ptr<LandPlot> {
+        return std::make_unique<AgriculturalPlot>(f[1], std::stod(f[2]), f[3],
+                                                  Owner{f[4], f[5], f[6]}, f[7],
+                                                  std::stod(f[8]));
+      }}},
+    {"C",
+     {9,
+      [](const std::vector<std::string> &f) -> std::unique_ptr<LandPlot> {
+        return std::make_unique<CommercialPlot>(f[1], std::stod(f[2]), f[3],
+                                                Owner{f[4], f[5], f[6]}, f[7],
+                                                std::stoi(f[8]));
+      }}},
+};
+
+std::unique_ptr<LandPlot> makePlot(const std::vector<std::string> &f) {
+  const auto type = kPlotTypes.find(f[0]);
+  if (type == kPlotTypes.end())
+    throw std::runtime_error("неизвестный тип участка: " + f[0]);
+  if (f.size() < type->second.minFields)
+    throw std::runtime_error("для типа '" + f[0] + "' ожидается " +
+                             std::to_string(type->second.minFields) +
+                             " полей, получено " + std::to_string(f.size()));
+  return type->second.parse(f);
 }
 
 } // namespace
